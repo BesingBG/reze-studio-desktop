@@ -104,6 +104,9 @@ async function main() {
   await run("npm", ["ci", "--omit=dev", "--no-audit", "--no-fund"], { cwd: stagingServer })
 
   console.log("[dist] electron-builder 打包...")
+  // 本机网络存在 TLS 中间人拦截,electron-builder 的 got 下载会因证书校验失败
+  // (unable to verify the first certificate)。此处按需关闭证书校验。
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
   const builderCli = require.resolve("electron-builder/out/cli/cli.js")
   const target = {
     win32: ["--win", "nsis"],
