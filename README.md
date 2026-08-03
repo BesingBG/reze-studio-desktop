@@ -39,8 +39,8 @@ npm run dev        # 启动 Electron + reze-studio 开发服务器
 ## 打包
 
 ```bash
-npm run dist        # 完整构建(staging 内注入空场景源码并 next build)
-npm run dist -- --skip-build   # 复用已有 .next(剥离不生效,不建议用于发行)
+npm run dist        # 完整构建(空场景版:构建期置 NEXT_PUBLIC_USE_DEFAULT_ASSETS=false)
+npm run dist -- --skip-build   # 复用已有 .next(空场景不生效,不建议用于发行)
 ```
 
 - Windows 产物:`dist/RezeStudio-<version>-Setup.exe`(NSIS 向导式)

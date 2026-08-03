@@ -30,58 +30,46 @@ function copyEntries(srcDir, destDir, exclude = []) {
   }
 }
 
-// 发行剥离:内置版权资源(models/animations)不在发行包内,引用集中在
-// components/engine-bridge.tsx(MODEL_PATH / VMD_PATH / 错误横幅)。
-// 必须用注入后的源码构建,否则 JS bundle 仍固化原版引用。
+// 发行剥离:内置版权资产(public/models、public/animations)不出现在发行包内。
+// 空场景由上游 reze-studio 原生支持:构建期置 NEXT_PUBLIC_USE_DEFAULT_ASSETS=false
+// (见 engine-bridge.tsx 的 USE_DEFAULT_ASSETS 判定),因此无需在此手工改源码。
 const strippedDirs = ["public/models", "public/animations"]
 
-// 空场景兼容:模型/VMD 加载失败是软失败(engine-bridge 内 try/catch)。
-// 注入把内置路径置空并关闭误导性错误横幅,打包版打开即为空编辑器,
-// 用户从文件菜单导入自己的 PMX 模型。
-function patchEngineBridge() {
-  const filePath = join(stagingServer, "components", "engine-bridge.tsx")
-  const src = readFileSync(filePath, "utf8")
-  // Windows 下 clone 的文件是 CRLF 行尾,多行锚点统一归一化后匹配,写回时还原。
-  const hasCrlf = src.includes("\r\n")
-  const normalized = hasCrlf ? src.replace(/\r\n/g, "\n") : src
-  const patches = [
-    ['export const MODEL_PATH = "/models/塞尔凯特/塞尔凯特.pmx"', 'export const MODEL_PATH = ""'],
-    ['export const VMD_PATH = "/animations/miku.vmd"', 'export const VMD_PATH = ""'],
-    // 地面在模型加载 try 块内,模型加载失败(空场景)时会跳过导致地面/网格消失。
-    // 移到 try/catch 之后无条件执行,同时抑制误导性错误横幅。
-    [
-      [
-        '          engine.addGround({ diffuseColor: new Vec3(0.05, 0.04, 0.06) })',
-        '        } catch {',
-        '          setEngineError(`Add model at public${MODEL_PATH}`)',
-        '        }',
-      ].join("\n"),
-      [
-        '        } catch {',
-        '          setEngineError(null)',
-        '        }',
-        '        engine.addGround({ diffuseColor: new Vec3(0.05, 0.04, 0.06) })',
-      ].join("\n"),
-    ],
-  ]
-  let out = normalized
-  for (const [from, to] of patches) {
-    if (!out.includes(from)) {
-      throw new Error(`engine-bridge.tsx 未命中剥离锚点,需同步更新: ${from}`)
-    }
-    out = out.split(from).join(to)
-  }
-  if (hasCrlf) out = out.replace(/\n/g, "\r\n")
-  writeFileSync(filePath, out)
-  console.log("[dist] 注入空场景兼容补丁(engine-bridge.tsx)...")
-}
-
 function applyReleaseStrip() {
-  console.log("[dist] 移除内置版权资源...")
+  console.log("[dist] 移除内置版权资源(public/models、public/animations)...")
   for (const dir of strippedDirs) {
     rmSync(join(stagingServer, dir), { recursive: true, force: true })
   }
-  patchEngineBridge()
+}
+
+// 运行期加载 next.config.ts 需要 typescript;打包后 --omit=dev 已将其移除,next 会
+// 触发自动 `npm install typescript`,在只读安装目录下必然失败并退出。转换为纯 JS
+// 配置 next.config.js 后不再需要 TypeScript,彻底消除该运行时依赖。
+function convertNextConfigTsToJs() {
+  const tsPath = join(stagingServer, "next.config.ts")
+  if (!existsSync(tsPath)) {
+    console.log("[dist] 无 next.config.ts,跳过配置转换")
+    return
+  }
+  let src = readFileSync(tsPath, "utf8")
+  const hasCrlf = src.includes("\r\n")
+  if (hasCrlf) src = src.replace(/\r\n/g, "\n")
+  const cfgText = src
+    .split("\n")
+    .filter((line) => !/^\s*import\s+type\s/.test(line))
+    .join("\n")
+  if (!/const\s+(nextConfig|config)\s*:\s*NextConfig\s*=\s*\{/.test(cfgText)) {
+    throw new Error("next.config.ts 转换失败:未找到 const nextConfig/config: NextConfig = {,需同步更新")
+  }
+  const js = cfgText
+    .split("\n")
+    .filter((line) => !/^\s*export\s+default\s+/.test(line))
+    .join("\n")
+    .replace(/const\s+(nextConfig|config)\s*:\s*NextConfig\s*=\s*\{/, "module.exports = {")
+  const jsPath = join(stagingServer, "next.config.js")
+  writeFileSync(jsPath, hasCrlf ? js.replace(/\n/g, "\r\n") : js)
+  rmSync(tsPath, { force: true })
+  console.log("[dist] next.config.ts → next.config.js(消除运行时 TypeScript 依赖)")
 }
 
 async function main() {
@@ -98,14 +86,18 @@ async function main() {
       throw new Error("缺少 .next 构建产物,请先执行 npm run build")
     }
     console.warn(
-      "[dist] 警告:--skip-build 直接复用既有 .next。若其由原版 engine-bridge 构建,发行包会缺少内置资源而无法加载模型,请改用完整构建。",
+      "[dist] 警告:--skip-build 直接复用既有 .next。若其不是以 NEXT_PUBLIC_USE_DEFAULT_ASSETS=false 构建,发行包仍会加载内置默认资产,请改用完整构建。",
     )
     copy(join(sub, ".next"), join(stagingServer, ".next"))
   } else {
     console.log("[dist] 安装依赖(全量,含构建工具)...")
     await run("npm", ["ci"], { cwd: stagingServer })
-    console.log("[dist] next build(使用剥离内置资源后的源码)...")
-    await run("npm", ["run", "build"], { cwd: stagingServer })
+    convertNextConfigTsToJs()
+    console.log("[dist] next build(空场景版: NEXT_PUBLIC_USE_DEFAULT_ASSETS=false)...")
+    await run("npm", ["run", "build"], {
+      cwd: stagingServer,
+      env: { ...process.env, NEXT_PUBLIC_USE_DEFAULT_ASSETS: "false" },
+    })
   }
 
   console.log("[dist] 安装生产依赖(仅 dependencies)...")
