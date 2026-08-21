@@ -22,16 +22,17 @@ Reze Studio Desktop 是一款跨平台的开源 [MMD（MikuMikuDance）](https:/
 
 ## 利用 GitHub Actions 云打包
 
-只想下载安装包、或不想在本地折腾打包环境?可直接用 GitHub Actions 在云端打包,Windows 与 macOS 各自独立:
+只想下载安装包、或不想在本地折腾打包环境?可直接用 GitHub Actions 在云端一键打包 Windows 与 macOS 两个平台的安装包:
 
-- **直接下载**:进入仓库 **Actions** 页,选择 `Build Windows Installer` 或 `Build macOS Installer` 工作流 → 打开最近一次成功的运行 → 在页面底部 **Artifacts** 下载 `installer-windows-<版本>` / `installer-macos-<版本>`,解压即得 `*-Setup.exe` / `*.dmg`。
-  > 注意:GitHub Actions 产物(Artifacts)**需要登录 GitHub 账号才能下载**,未登录时看不到下载入口。
-- **自行打包(Fork)**:Fork 本仓库(保持 public 即可使用 GitHub 公共仓库的免费构建额度)→ 在自己的 Fork 仓库打开 **Actions** → 选择对应工作流 → **Run workflow**:
+- **直接下载**:进入仓库 **Actions** 页,选择 `Build Installer (Windows & macOS)` 工作流,Run 一次会同时产出两个平台 → 打开最近一次成功的运行 → 在页面底部 **Artifacts** 下载 `installer-windows-<版本>-<SHA>` / `installer-macos-<版本>-<SHA>`,解压即得 `Reze-Studio-Desktop-<版本>-windows-<SHA>-Setup.exe` / `Reze-Studio-Desktop-<版本>-macos-<SHA>.dmg`(<SHA> 为上一步对应上游提交的短哈希)。
+  > 注意:GitHub Actions 产物(Artifacts)**需要登录 GitHub 账号才能下载**,未登录时看不到下载入口;macOS 版未签名,首次打开若被拦见下方"macOS 未签名放行"。
+- **自行打包(Fork)**:Fork 本仓库(保持 public 即可使用 GitHub 公共仓库的免费构建额度)→ 在自己的 Fork 仓库打开 **Actions** → 选择 `Build Installer (Windows & macOS)` 工作流 → **Run workflow**:
   - `upstream_ref` 留空:按仓库**已适配的上游版本**(当前为上游 v0.1.5)打包;
   - 也可填 `latest-commit`(上游默认分支最新提交)/ `latest`(最新 tag)/ 具体 tag 或 commit SHA;
   - `version_override` 可强制指定产物版本号,留空则自动读取上游 `package.json` 的 version;
+  - 勾选 `upload_release`(默认不勾)时,构建成功后会把 win/mac 两个安装包上传到该仓库同一个 tag 的 **Pre-release**(可随时删除/编辑/转正式);
   - 构建完成后,同样到自己 Fork 的运行记录底部 **Artifacts** 下载安装包。
-- **触发方式**:两条工作流均为**手动触发**(`workflow_dispatch`),当前**未开启定时自动打包**,即不会自动跟随上游发版出包;构建建议在仓库主页勾选相应 workflow 手动运行。
+- **触发方式**:该工作流为**手动触发**(`workflow_dispatch`),当前**未开启定时自动打包**,即不会自动跟随上游发版出包;构建建议在仓库主页勾选相应 workflow 手动运行。
 
 ## 环境要求
 
@@ -58,6 +59,17 @@ npm run dist -- --skip-build   # 复用已有 .next(空场景不生效,不建议
 
 - Windows 产物:`dist/RezeStudio-<version>-Setup.exe`(NSIS 向导式)
 - macOS 产物:`dist/RezeStudio-<version>.dmg`(未签名,安装见 `resources/MAC-install.md`)
+
+### macOS 未签名放行(一次即可)
+
+应用未购买 Apple 签名,首次打开可能被 Gatekeeper 拦截;在终端执行一次即可:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Reze Studio.app"
+```
+
+> 也可用 `xattr -cr "/Applications/Reze Studio.app"` 全清扩展属性;若报"应用已损坏"说明隔离标记在包内,务必用上面这条递归版。
+> 右键"打开"、系统设置允许等其它方式见 `resources/MAC-install.md`。
 
 图标由 `build/icon-source.jpg` 生成:
 
