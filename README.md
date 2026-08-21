@@ -27,7 +27,7 @@ Reze Studio Desktop 是一款跨平台的开源 [MMD（MikuMikuDance）](https:/
 - **直接下载**:进入仓库 **Actions** 页,选择 `Build Windows Installer` 或 `Build macOS Installer` 工作流 → 打开最近一次成功的运行 → 在页面底部 **Artifacts** 下载 `installer-windows-<版本>` / `installer-macos-<版本>`,解压即得 `*-Setup.exe` / `*.dmg`。
   > 注意:GitHub Actions 产物(Artifacts)**需要登录 GitHub 账号才能下载**,未登录时看不到下载入口。
 - **自行打包(Fork)**:Fork 本仓库(保持 public 即可使用 GitHub 公共仓库的免费构建额度)→ 在自己的 Fork 仓库打开 **Actions** → 选择对应工作流 → **Run workflow**:
-  - `upstream_ref` 留空:按仓库**已适配的上游版本**(当前为上游 v0.1.3)打包;
+  - `upstream_ref` 留空:按仓库**已适配的上游版本**(当前为上游 v0.1.5)打包;
   - 也可填 `latest-commit`(上游默认分支最新提交)/ `latest`(最新 tag)/ 具体 tag 或 commit SHA;
   - `version_override` 可强制指定产物版本号,留空则自动读取上游 `package.json` 的 version;
   - 构建完成后,同样到自己 Fork 的运行记录底部 **Artifacts** 下载安装包。
@@ -72,7 +72,7 @@ electron/            Electron 主进程与 preload
 scripts/             dev / dist / make-icon / after-pack
 resources/           说明文档
 config.json          在线地址、更新地址、端口
-reze-studio/         子模块(上游 reze-studio v0.1.3)
+reze-studio/         子模块(上游 reze-studio v0.1.5)
 ```
 
 ## License

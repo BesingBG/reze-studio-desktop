@@ -30,13 +30,13 @@ function copyEntries(srcDir, destDir, exclude = []) {
   }
 }
 
-// 发行剥离:内置版权资产(public/models、public/animations)不出现在发行包内。
+// 发行剥离:内置版权资产(public/models、public/animations、public/audio)不出现在发行包内。
 // 空场景由上游 reze-studio 原生支持:构建期置 NEXT_PUBLIC_USE_DEFAULT_ASSETS=false
 // (见 engine-bridge.tsx 的 USE_DEFAULT_ASSETS 判定),因此无需在此手工改源码。
-const strippedDirs = ["public/models", "public/animations"]
+const strippedDirs = ["public/models", "public/animations", "public/audio"]
 
 function applyReleaseStrip() {
-  console.log("[dist] 移除内置版权资源(public/models、public/animations)...")
+  console.log("[dist] 移除内置版权资源(public/models、public/animations、public/audio)...")
   for (const dir of strippedDirs) {
     rmSync(join(stagingServer, dir), { recursive: true, force: true })
   }
