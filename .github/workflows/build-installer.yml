@@ -198,14 +198,19 @@ jobs:
           git -C reze-studio fetch --unshallow --tags --force origin 2>/dev/null || git -C reze-studio fetch --tags --force origin
           LAST_TAG=$(git -C reze-studio describe --tags --abbrev=0 HEAD 2>/dev/null || echo "")
           {
-            echo "基于上游 Web 版 reze-studio 的 $SHA 构建的离线本地桌面版，支持 macOS 与 Windows。"
+            echo "基于上游 Web 版 reze-studio v${VERSION} (\`${SHA}\`) 构建的离线本地桌面版，支持 macOS 与 Windows。"
+            echo
+            echo "> **上游版本:** v${VERSION} (${SHA})"
             echo
             echo "如果当前桌面版较为落后，可直接使用网页版；或 Fork 本项目，在 Actions 中自行打包构建最新安装包。"
-            if [ -n "$LAST_TAG" ]; then
-              echo
-              echo "上游更新（$LAST_TAG → $SHA）："
-              git -C reze-studio log --oneline "$LAST_TAG"..HEAD | sed 's/^/- /'
-            fi
+            echo
+            echo "---"
+            echo
+            echo "## ⭐ Star this project / 给个 Star 吧"
+            echo
+            echo "If you find this useful, please consider giving it a star! It helps others discover this project."
+            echo
+            echo "如果这个项目对你有帮助，欢迎点个 Star！你的支持是我持续更新的动力。"
           } > body.md
           echo "--- release body ---"
           cat body.md

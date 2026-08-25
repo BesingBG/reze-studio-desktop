@@ -1,0 +1,226 @@
+name: Auto Build on Upstream Update
+
+on:
+  schedule:
+    - cron: "0 9 * * *"  # UTC 09:00 = 北京 17:00 = 美东 04:00 EST
+  workflow_dispatch:      # 手动触发，方便测试
+
+permissions:
+  contents: write
+
+jobs:
+  # Job 1: 检查上游是否有更新
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      has_update: ${{ steps.compare.outputs.has_update }}
+      sha: ${{ steps.resolve.outputs.SHA }}
+      version: ${{ steps.resolve.outputs.VERSION }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        shell: bash
+        run: |
+          git -C reze-studio fetch --tags --force origin
+
+      - name: Resolve upstream HEAD
+        id: resolve
+        shell: bash
+        run: |
+          UPSTREAM_SHA=$(git -C reze-studio rev-parse --short origin/main)
+          echo "Upstream HEAD = $UPSTREAM_SHA"
+
+          VERSION=$(node -p "require('./reze-studio/package.json').version")
+          VERSION="${VERSION#v}"
+          echo "Upstream version = $VERSION"
+
+          echo "SHA=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Compare with latest release
+        id: compare
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Checking latest release..."
+
+          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No existing release found — first build"
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Latest release tag: $LATEST_TAG"
+
+          RELEASE_BODY=$(gh release view "$LATEST_TAG" --json body --jq '.body' 2>/dev/null || echo "")
+          RELEASE_SHA=$(echo "$RELEASE_BODY" | grep -oE '\([a-f0-9]{7,}\)' | head -1 | tr -d '()' || true)
+
+          if [ -z "$RELEASE_SHA" ]; then
+            RELEASE_SHA=$(git log --oneline -1 "$LATEST_TAG" 2>/dev/null | grep -oE '[a-f0-9]{7,}$' || true)
+          fi
+
+          CURRENT_SHA="${{ steps.resolve.outputs.SHA }}"
+
+          if [ -z "$RELEASE_SHA" ]; then
+            echo "Cannot determine previous build SHA — triggering build"
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Previous build SHA: $RELEASE_SHA"
+          echo "Current  upstream:  $CURRENT_SHA"
+
+          if [ "$RELEASE_SHA" = "$CURRENT_SHA" ]; then
+            echo "No update — upstream SHA matches latest release"
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Update detected!"
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Job 2: 构建安装包 (仅当有更新时)
+  build:
+    needs: check
+    if: needs.check.outputs.has_update == 'true'
+    strategy:
+      matrix:
+        include:
+          - platform: windows
+            runs-on: windows-latest
+            artifact: installer-windows
+            glob: dist/*.exe
+          - platform: macos
+            runs-on: macos-15
+            artifact: installer-macos
+            glob: dist/*.dmg
+    runs-on: ${{ matrix.runs-on }}
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      SHA: ${{ needs.check.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Checkout upstream to latest
+        shell: bash
+        run: |
+          git -C reze-studio fetch --tags --force origin
+          git -C reze-studio checkout origin/main
+          echo "Submodule now at: $(git -C reze-studio rev-parse --short HEAD)"
+
+      - name: Sync version to package.json
+        shell: bash
+        run: |
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ env.VERSION }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+          echo "package.json version = ${{ env.VERSION }}"
+
+      - name: Build (${{ matrix.platform }})
+        shell: bash
+        env:
+          ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+        run: |
+          npm ci
+          node scripts/dist.mjs
+
+      - name: Rename artifacts with upstream SHA
+        shell: bash
+        run: |
+          cd dist
+          for f in *.dmg *.exe; do
+            [ -e "$f" ] || continue
+            new="${f/RezeStudio/Reze-Studio-Desktop}"
+            new="${new/${VERSION}/${VERSION}-${{ matrix.platform }}-${SHA}}"
+            mv "$f" "$new"
+            echo "Renamed: $f -> $new"
+          done
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ env.VERSION }}-${{ env.SHA }}
+          path: ${{ matrix.glob }}
+          if-no-files-found: error
+
+  # Job 3: 发布 Pre-release (仅当有更新时)
+  release:
+    needs: [check, build]
+    if: needs.check.outputs.has_update == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      SHA: ${{ needs.check.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fetch upstream tags
+        shell: bash
+        run: |
+          git -C reze-studio fetch --unshallow --tags --force origin 2>/dev/null || git -C reze-studio fetch --tags --force origin
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+
+      - name: Compose release body
+        shell: bash
+        run: |
+          LAST_TAG=$(git -C reze-studio describe --tags --abbrev=0 HEAD 2>/dev/null || echo "")
+
+          {
+            echo "## Reze Studio Desktop v${VERSION}"
+            echo
+            echo "基于上游 Web 版 reze-studio v${VERSION} (\`${SHA}\`) 构建的离线本地桌面版，支持 macOS 与 Windows。"
+            echo
+            echo "> **上游版本:** v${VERSION} (${SHA})"
+            if [ -n "$LAST_TAG" ]; then
+              echo "> **最近 tag:** ${LAST_TAG}"
+            fi
+            echo
+            echo "如果当前桌面版较为落后，可直接使用网页版；或 Fork 本项目，在 Actions 中自行打包构建最新安装包。"
+            echo
+            echo "---"
+            echo
+            echo "## ⭐ Star this project / 给个 Star 吧"
+            echo
+            echo "If you find this useful, please consider giving it a star! It helps others discover this project."
+            echo
+            echo "如果这个项目对你有帮助，欢迎点个 Star！你的支持是我持续更新的动力。"
+          } > body.md
+
+          echo "--- release body ---"
+          cat body.md
+
+      - name: Publish Pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installers/*
+          tag_name: v${{ env.VERSION }}
+          name: Reze Studio Desktop v${{ env.VERSION }}
+          body_path: body.md
+          prerelease: true
+          allowUpdates: true
