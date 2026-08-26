@@ -2,14 +2,14 @@ name: Auto Build on Upstream Update
 
 on:
   schedule:
-    - cron: "0 9 * * *"  # UTC 09:00 = 北京 17:00 = 美东 04:00 EST
-  workflow_dispatch:      # 手动触发，方便测试
+    - cron: "0 9 * * *"
+    - cron: "45 9 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  # Job 1: 检查上游是否有更新
   check:
     runs-on: ubuntu-latest
     outputs:
@@ -23,22 +23,17 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Fetch upstream
-        shell: bash
-        run: |
-          git -C reze-studio fetch --tags --force origin
-
       - name: Resolve upstream HEAD
         id: resolve
         shell: bash
         run: |
-          UPSTREAM_SHA=$(git -C reze-studio rev-parse --short origin/main)
+          git -C reze-studio fetch --tags --force origin
+          git -C reze-studio checkout origin/main
+          UPSTREAM_SHA=$(git -C reze-studio rev-parse --short HEAD)
           echo "Upstream HEAD = $UPSTREAM_SHA"
-
           VERSION=$(node -p "require('./reze-studio/package.json').version")
           VERSION="${VERSION#v}"
           echo "Upstream version = $VERSION"
-
           echo "SHA=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -49,35 +44,26 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Checking latest release..."
-
           LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
-
           if [ -z "$LATEST_TAG" ]; then
             echo "No existing release found — first build"
             echo "has_update=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
           echo "Latest release tag: $LATEST_TAG"
-
           RELEASE_BODY=$(gh release view "$LATEST_TAG" --json body --jq '.body' 2>/dev/null || echo "")
           RELEASE_SHA=$(echo "$RELEASE_BODY" | grep -oE '\([a-f0-9]{7,}\)' | head -1 | tr -d '()' || true)
-
           if [ -z "$RELEASE_SHA" ]; then
             RELEASE_SHA=$(git log --oneline -1 "$LATEST_TAG" 2>/dev/null | grep -oE '[a-f0-9]{7,}$' || true)
           fi
-
           CURRENT_SHA="${{ steps.resolve.outputs.SHA }}"
-
           if [ -z "$RELEASE_SHA" ]; then
             echo "Cannot determine previous build SHA — triggering build"
             echo "has_update=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
           echo "Previous build SHA: $RELEASE_SHA"
           echo "Current  upstream:  $CURRENT_SHA"
-
           if [ "$RELEASE_SHA" = "$CURRENT_SHA" ]; then
             echo "No update — upstream SHA matches latest release"
             echo "has_update=false" >> "$GITHUB_OUTPUT"
@@ -86,7 +72,6 @@ jobs:
             echo "has_update=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # Job 2: 构建安装包 (仅当有更新时)
   build:
     needs: check
     if: needs.check.outputs.has_update == 'true'
@@ -159,7 +144,6 @@ jobs:
           path: ${{ matrix.glob }}
           if-no-files-found: error
 
-  # Job 3: 发布 Pre-release (仅当有更新时)
   release:
     needs: [check, build]
     if: needs.check.outputs.has_update == 'true'
@@ -190,7 +174,6 @@ jobs:
         shell: bash
         run: |
           LAST_TAG=$(git -C reze-studio describe --tags --abbrev=0 HEAD 2>/dev/null || echo "")
-
           {
             echo "## Reze Studio Desktop v${VERSION}"
             echo
@@ -211,7 +194,6 @@ jobs:
             echo
             echo "如果这个项目对你有帮助，欢迎点个 Star！你的支持是我持续更新的动力。"
           } > body.md
-
           echo "--- release body ---"
           cat body.md
 
