@@ -3,7 +3,7 @@ name: Auto Build on Upstream Update
 on:
   schedule:
     - cron: "0 9 * * *"
-    - cron: "37 10 * * *"
+    - cron: "15 11 * * *"
   workflow_dispatch:
 
 permissions:
