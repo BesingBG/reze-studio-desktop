@@ -1,6 +1,6 @@
 {
   "name": "reze-studio-desktop",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": false,
   "description": "Reze Studio 桌面客户端",
   "main": "electron/main.mjs",
